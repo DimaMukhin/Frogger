@@ -1,6 +1,7 @@
 #include <stdlib.h>
 
 #include "loglist.h"
+#include "gameglobals.h"
 
 LogList* createLogList()
 {
@@ -11,30 +12,23 @@ LogList* createLogList()
 
 void addLog(Log *log, LogList *logList)
 {
+	pthread_mutex_lock(&logListMutex);
+	
 	LogNode *newNode = (LogNode*) malloc(sizeof(LogNode));
 	newNode->log = log;
-	
-	LogNode *curr = logList->top;
-	LogNode *prev = NULL;
-	while (curr != NULL && curr->log->streamRow < log->streamRow)
-	{
-		prev = curr;
-		curr = curr->next;
-	}
-	
-	if (prev == NULL)
-		logList->top = newNode;
-	else
-		prev->next = newNode;
-	
-	newNode->next = curr;
+	newNode->next = logList->top;
+	logList->top = newNode;
+
+	pthread_mutex_unlock(&logListMutex);
 }
 
 void removeLog(Log *log, LogList *logList)
 {
+	pthread_mutex_lock(&logListMutex);
+	
 	LogNode *curr = logList->top;
 	LogNode *prev = NULL;
-	while (curr != NULL && curr->log->streamRow != log->streamRow)
+	while (curr != NULL && curr->log != log)
 	{
 		prev = curr;
 		curr = curr->next;
@@ -49,10 +43,14 @@ void removeLog(Log *log, LogList *logList)
 	}
 	
 	free(curr);
+	
+	pthread_mutex_unlock(&logListMutex);
 }
 
 Log* getLog(int streamRow, LogList *logList)
 {
+	pthread_mutex_lock(&logListMutex);
+	
 	LogNode *curr = logList->top;
 	while (curr != NULL && curr->log->streamRow != streamRow)
 		curr = curr->next;
@@ -61,4 +59,6 @@ Log* getLog(int streamRow, LogList *logList)
 		return curr->log;
 	
 	return NULL;
+	
+	pthread_mutex_unlock(&logListMutex);
 }

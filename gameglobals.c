@@ -4,21 +4,50 @@
 #include "gameglobals.h"
 #include "loglist.h"
 
+/* private function prototypes */
+
+void initializeHomes();
+
+/* private global variables */
+
+int lives;
+Home *homes;
+
+/* public functions */
+
 void initializeGameGlobals()
 {
 	lives = 4;
+	initializeHomes();
+}
+
+Home* getHome(int col)
+{
+	for (int i = 0; i < NUM_HOMES; i++)
+	{
+		if (homes[i].leftCol <= col && homes[i].rightCol >= col)
+			return &homes[i];
+	}
 	
-	// pthread_mutexattr_t attributes;
-	// pthread_mutexattr_init(&attributes);
-	// pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
-	// pthread_mutex_init(&playerMutex, &attributes);
-	
-	// homes[0] = (Home*) malloc(sizeof(Home));
-	// homes[1] = (Home*) malloc(sizeof(Home));
-	// homes[2] = (Home*) malloc(sizeof(Home));
-	// homes[3] = (Home*) malloc(sizeof(Home));
-	// homes[4] = (Home*) malloc(sizeof(Home));
-	
+	return NULL;
+}
+
+/* public global variable getters/setters */
+
+int getLives()
+{
+	return lives;
+}
+
+void setLives(lifeNum)
+{
+	lives = lifeNum;
+}
+
+/* private functions */
+
+void initializeHomes()
+{
 	homes = (Home*) malloc(sizeof(Home) * NUM_HOMES);
 	
 	homes[0].open = 1;
@@ -38,17 +67,4 @@ void initializeGameGlobals()
 	homes[2].rightCol = 42;
 	homes[3].rightCol = 60;
 	homes[4].rightCol = 78;
-	
-	logList = (LogList*) malloc(sizeof(LogList));
-}
-
-Home* getHome(int col)
-{
-	for (int i = 0; i < NUM_HOMES; i++)
-	{
-		if (homes[i].leftCol <= col && homes[i].rightCol >= col)
-			return &homes[i];
-	}
-	
-	return NULL;
 }

@@ -2,11 +2,12 @@
 #define LOGROW_H
 
 #include "log.h"
+#include "loglist.h"
 
 typedef struct logRow
 {
 	int row;
-	Log *log;
+	LogList *logs;
 } LogRow;
 
 LogRow* createLogRow(int row);

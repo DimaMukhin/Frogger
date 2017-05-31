@@ -9,7 +9,7 @@
 
 #define LOG_ANIM_TILES 2
 
-/* private functions */
+/* private function prototypes */
 void clearLog();
 
 static char* LOG_GRAPHIC[LOG_ANIM_TILES][LOG_HEIGHT+1] = {
@@ -62,16 +62,16 @@ void *logUpdate(void *arg)
 		
 		log->col -= log->direction;
 		
-		// merge if and else if
+		// TODO merge if and else if
 		if (log->col + LOG_LENGTH < -10 && log->direction == 1)
 		{
-			removeLog(log, logList);
+			removeLog(log, logRows[log->streamRow]->logs);
 			free(log);
 			pthread_exit(NULL);
 		}
 		else if (log->col > 80 && log->direction == -1)
 		{
-			removeLog(log, logList);
+			removeLog(log, logRows[log->streamRow]->logs);
 			free(log);
 			pthread_exit(NULL);
 		}

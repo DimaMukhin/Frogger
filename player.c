@@ -16,13 +16,18 @@
 
 /* private functions */
 void clearPlayer();
-
 void landPlayer();
-
 int isPlayerOverWater();
-
 void killFrog();
 
+/* private setters (for mutex) */
+void setPlayerBoardRow(int new);
+void setPlayerSpeed(int new);
+void setPlayerDirection(int new);
+void setPlayerRow(int new);
+void setPlayerCol(int new);
+
+/* private variables */
 int playerBoardRow = 0;
 int playerSpeed = 1;
 int playerDirection = 0;
@@ -37,13 +42,7 @@ static char* PLAYER_GRAPHIC[PLAYER_ANIM_TILES][PLAYER_HEIGHT+1] = {
 };
 char** playerTile = PLAYER_GRAPHIC[1];
 
-void drawPlayer()
-{
-	pthread_mutex_lock(&drawMutex);
-	consoleDrawImage(playerRow, playerCol, playerTile, PLAYER_HEIGHT);
-	pthread_mutex_unlock(&drawMutex);
-}
-
+// player thread
 void *playerUpdate()
 {
 	int i = 0;
@@ -51,16 +50,12 @@ void *playerUpdate()
 	while (1)
 	{
 		sleepTicks(playerSpeed);
-
-		pthread_mutex_lock(&playerMutex);
 		
-		playerCol -= playerDirection;
+		setPlayerCol(playerCol - playerDirection);
 		if (playerCol <= 0)
-			playerCol = 0;
+			setPlayerCol(0);
 		else if (playerCol >= 80 - PLAYER_WIDTH)
-			playerCol = 80 - PLAYER_WIDTH;	
-		
-		pthread_mutex_unlock(&playerMutex);
+			setPlayerCol(80 - PLAYER_WIDTH);	
 		
 		if (isPlayerOverWater())
 				killFrog();
@@ -78,25 +73,21 @@ void *playerUpdate()
 	pthread_exit(NULL);
 }
 
-void clearPlayer()
-{
-	pthread_mutex_lock(&drawMutex);
-	consoleClearImage(playerRow, playerCol, PLAYER_HEIGHT, strlen(PLAYER_GRAPHIC[0][0]));
-	pthread_mutex_unlock(&drawMutex);
-}
+/* public functions */
+/* NOTE: can be called by different threads (use mutex) */
 
 void movePlayerUp()
 {
 	clearPlayer();
 	if (playerBoardRow < 4)
 	{
-		playerRow -= 4;
-		playerBoardRow++;
+		setPlayerRow(playerRow - 4);
+		setPlayerBoardRow(playerBoardRow + 1);
 		landPlayer();
 	}
 	else if (playerBoardRow == 4)
 	{
-		playerBoardRow++;
+		setPlayerBoardRow(playerBoardRow + 1);
 		landPlayer();
 	}		
 }
@@ -106,8 +97,8 @@ void movePlayerDown()
 	clearPlayer();
 	if (playerBoardRow != 0)
 	{
-		playerRow += 4;
-		playerBoardRow--;
+		setPlayerRow(playerRow + 4);
+		setPlayerBoardRow(playerBoardRow - 1);
 		landPlayer();
 	}
 }
@@ -115,13 +106,29 @@ void movePlayerDown()
 void movePlayerLeft()
 {
 	clearPlayer();
-	playerCol -= 1;
+	setPlayerCol(playerCol - 1);
 }
 
 void movePlayerRight()
 {
 	clearPlayer();
-	playerCol += 1;
+	setPlayerCol(playerCol + 1);
+}
+
+/* private functions */
+
+void drawPlayer()
+{
+	pthread_mutex_lock(&drawMutex);
+	consoleDrawImage(playerRow, playerCol, playerTile, PLAYER_HEIGHT);
+	pthread_mutex_unlock(&drawMutex);
+}
+
+void clearPlayer()
+{
+	pthread_mutex_lock(&drawMutex);
+	consoleClearImage(playerRow, playerCol, PLAYER_HEIGHT, strlen(PLAYER_GRAPHIC[0][0]));
+	pthread_mutex_unlock(&drawMutex);
 }
 
 void landPlayer()
@@ -129,19 +136,19 @@ void landPlayer()
 	// if player is above raging crocodile infested water
 	if (playerBoardRow > 0 && playerBoardRow < 5)
 	{
-		Log *log = getLog(playerBoardRow - 1, logList);
 		if (!isPlayerOverWater())
 		{
-			playerSpeed = log->speed;
-			playerDirection = log->direction;
+			Log *log = logRows[playerBoardRow - 1]->logs->top->log; // TODO: this is not safe!! what if log row is empty
+			setPlayerSpeed(log->speed);
+			setPlayerDirection(log->direction);
 		}
 		else
 			killFrog();
 	}
 	else if (playerBoardRow == 0) // if player landed on land
 	{
-		playerSpeed = 1;
-		playerDirection = 0;
+		setPlayerSpeed(1);
+		setPlayerDirection(0);
 	}
 	else if (playerBoardRow == 5)
 	{
@@ -149,47 +156,91 @@ void landPlayer()
 		if (home != NULL && home->open != 0)
 		{
 			home->open = 0;
-			playerRow -= 3;
+			setPlayerRow(playerRow - 3);
 			playerTile = PLAYER_GRAPHIC[0];
 			drawPlayer();
 			
-			playerRow = DEFAULT_PLAYER_ROW;
-			playerCol = DEFAULT_PLAYER_COL;
-			playerSpeed = 1;
-			playerDirection = 0;
-			playerBoardRow = 0;
+			setPlayerRow(DEFAULT_PLAYER_ROW);
+			setPlayerCol(DEFAULT_PLAYER_COL);
+			setPlayerSpeed(1);
+			setPlayerDirection(0);
+			setPlayerBoardRow(0);
 		}
 		else
 		{
-			playerBoardRow = 4;
+			setPlayerBoardRow(4);
 		}
 	}
 }
 
 int isPlayerOverWater()
 {
-	if (playerBoardRow > 0 && playerBoardRow < 5)
+	int flag = 1;
+	if (playerBoardRow == 0)
+		flag = 0;
+	else if (playerBoardRow > 0 && playerBoardRow < 5)
 	{
-		Log *log = getLog(playerBoardRow - 1, logList);
-		if (log == NULL || playerCol < log->col || playerCol > (log->col + LOG_LENGTH))
-			return 1;
+		LogRow *logRow = logRows[playerBoardRow - 1];
+		LogNode *curr = logRow->logs->top;
+		while (curr != NULL)
+		{
+			Log *log = curr->log;
+			
+			if (log != NULL && playerCol > log->col && playerCol < (log->col + LOG_LENGTH))
+				flag = 0;
+			
+			curr = curr->next;
+		}	
 	}
 	
-	return 0;
+	return flag;
 }
 
 void killFrog()
 {
-	lives--;
+	setLives(getLives() - 1);
 	drawLives();
-	
-	pthread_mutex_lock(&playerMutex);
 			
-	playerRow = DEFAULT_PLAYER_ROW;
-	playerCol = DEFAULT_PLAYER_COL;
-	playerSpeed = 1;
-	playerDirection = 0;
-	playerBoardRow = 0;
-	
+	setPlayerRow(DEFAULT_PLAYER_ROW);
+	setPlayerCol(DEFAULT_PLAYER_COL);
+	setPlayerSpeed(1);
+	setPlayerDirection(0);
+	setPlayerBoardRow(0);
+}
+
+/* private setters */
+
+void setPlayerBoardRow(int boardRow)
+{
+	pthread_mutex_lock(&playerMutex);
+	playerBoardRow = boardRow;
+	pthread_mutex_unlock(&playerMutex);
+}
+
+void setPlayerSpeed(int speed)
+{
+	pthread_mutex_lock(&playerMutex);
+	playerSpeed = speed;
+	pthread_mutex_unlock(&playerMutex);
+}
+
+void setPlayerDirection(int direction)
+{
+	pthread_mutex_lock(&playerMutex);
+	playerDirection = direction;
+	pthread_mutex_unlock(&playerMutex);
+}
+
+void setPlayerRow(int row)
+{
+	pthread_mutex_lock(&playerMutex);
+	playerRow = row;
+	pthread_mutex_unlock(&playerMutex);
+}
+
+void setPlayerCol(int col)
+{
+	pthread_mutex_lock(&playerMutex);
+	playerCol = col;
 	pthread_mutex_unlock(&playerMutex);
 }

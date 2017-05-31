@@ -46,11 +46,6 @@ char *GAME_BOARD[] = {
 "",
 "" };
 
-LogRow *logRow0;
-LogRow *logRow1;
-LogRow *logRow2;
-LogRow *logRow3;
-
 // game setup function
 void runFrogger()
 {
@@ -65,21 +60,21 @@ void runFrogger()
 	pthread_t playerUpdateThread;
 	if (pthread_create(&playerUpdateThread, NULL, playerUpdate, NULL) == -1) { perror("playerUpdate"); exit(EXIT_FAILURE); }
 	
-	logRow0 = createLogRow(0);
+	logRows[0] = createLogRow(0);
 	pthread_t logRow0Thread;
-	if (pthread_create(&logRow0Thread, NULL, logRowUpdate, logRow0) == -1) { perror("logRow0"); exit(EXIT_FAILURE); }
+	if (pthread_create(&logRow0Thread, NULL, logRowUpdate, logRows[0]) == -1) { perror("logRows[0]"); exit(EXIT_FAILURE); }
 	
-	logRow1 = createLogRow(1);
+	logRows[1] = createLogRow(1);
 	pthread_t logRow1Thread;
-	if (pthread_create(&logRow1Thread, NULL, logRowUpdate, logRow1) == -1) { perror("logRow1"); exit(EXIT_FAILURE); }
+	if (pthread_create(&logRow1Thread, NULL, logRowUpdate, logRows[1]) == -1) { perror("logRows[1]"); exit(EXIT_FAILURE); }
 	
-	logRow2 = createLogRow(2);
+	logRows[2] = createLogRow(2);
 	pthread_t logRow2Thread;
-	if (pthread_create(&logRow2Thread, NULL, logRowUpdate, logRow2) == -1) { perror("logRow2"); exit(EXIT_FAILURE); }
+	if (pthread_create(&logRow2Thread, NULL, logRowUpdate, logRows[2]) == -1) { perror("logRows[2]"); exit(EXIT_FAILURE); }
 	
-	logRow3 = createLogRow(3);
+	logRows[3] = createLogRow(3);
 	pthread_t logRow3Thread;
-	if (pthread_create(&logRow3Thread, NULL, logRowUpdate, logRow3) == -1) { perror("logRow3"); exit(EXIT_FAILURE); }
+	if (pthread_create(&logRow3Thread, NULL, logRowUpdate, logRows[3]) == -1) { perror("logRows[3]"); exit(EXIT_FAILURE); }
 	
 	pthread_join(drawThread, NULL);
 	pthread_join(keyboardThread, NULL);
@@ -102,10 +97,10 @@ void *draw()
 	{
 		sleepTicks(1);
 				
-		drawLogRow(logRow0);
-		drawLogRow(logRow1);
-		drawLogRow(logRow2);
-		drawLogRow(logRow3);
+		drawLogRow(logRows[0]);
+		drawLogRow(logRows[1]);
+		drawLogRow(logRows[2]);
+		drawLogRow(logRows[3]);
 		drawPlayer();
 		
 		pthread_mutex_lock(&drawMutex);
@@ -148,9 +143,10 @@ void *keyboard()
 
 void drawLives()
 {
-	pthread_mutex_lock(&drawMutex);
 	char life;
-	sprintf(&life, "%d", lives);
+	sprintf(&life, "%d", getLives());
+	
+	pthread_mutex_lock(&drawMutex);
 	putString(&life, 0, 41, 1);
 	pthread_mutex_unlock(&drawMutex);
 }
