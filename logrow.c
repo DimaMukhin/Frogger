@@ -8,6 +8,7 @@
 #include "console.h"
 #include "gameglobals.h"
 #include "loglist.h"
+#include "threadwrappers.h"
 
 LogRow* createLogRow(int row)
 {	
@@ -20,30 +21,36 @@ LogRow* createLogRow(int row)
 
 void *logRowUpdate(void *arg)
 {
+	srand(time(NULL));
 	LogRow *logRow = (LogRow*) arg;
 	pthread_t logThread[5];
 	
 	int i = 0;
-	while (1)
+	int randomWait = rand() % 200 + 300;
+	while (!gameOver)
 	{
-		sleepTicks(rand() % 500 + 500);
+		sleepTicks(1);
 		
-		Log *log = createLog(logRow->row);
-		addLog(log, logRow->logs);
+		if (i == 0)
+		{
+			Log *log = createLog(logRow->row);
+			addLog(log, logRow->logs);
+			
+			// TODO: this one is also very dangerous, what if top log is not the new one?
+			createThread(&logThread[0], logUpdate, logRow->logs->top->log);
+		}
 		
-		// TODO: this one is also very dangerous, what if top log is not the new one?
-		if (pthread_create(&logThread[0], NULL, logUpdate, logRow->logs->top->log) == -1) { perror("log"); exit(EXIT_FAILURE); }
-		
-		i = (i + 1) % 5;
-		srand(time(NULL));
+		i = (i + 1) % randomWait;
 	}
 	
 	// TODO: HUGE problem with this. when you dont join a thread, you dont release it from memory
-	pthread_join(logThread[0], NULL);
-	pthread_join(logThread[1], NULL);
-	pthread_join(logThread[2], NULL);
-	pthread_join(logThread[3], NULL);
-	pthread_join(logThread[4], NULL);
+	// pthread_join(logThread[0], NULL);
+	// pthread_join(logThread[1], NULL);
+	// pthread_join(logThread[2], NULL);
+	// pthread_join(logThread[3], NULL);
+	// pthread_join(logThread[4], NULL);
+	
+	pthread_exit(NULL);
 }
 
 void drawLogRow(LogRow *logRow)

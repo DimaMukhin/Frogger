@@ -17,6 +17,7 @@ Home *homes;
 
 void initializeGameGlobals()
 {
+	gameOver = 0;
 	lives = 4;
 	initializeHomes();
 }
@@ -30,6 +31,11 @@ Home* getHome(int col)
 	}
 	
 	return NULL;
+}
+
+Home* getHomeIndex(int index)
+{
+	return &homes[index];
 }
 
 /* public global variable getters/setters */

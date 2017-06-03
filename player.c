@@ -8,11 +8,24 @@
 #include "loglist.h"
 #include "gameglobals.h"
 
-#define PLAYER_ANIM_TILES 2
+#define ANIM_TILES 2
 #define PLAYER_HEIGHT 2
 #define PLAYER_WIDTH 2
+#define DIRECTION_LEFT -1
+#define DIRECTION_RIGHT 1
+#define DIRECTION_STAY 0
+#define DEFAULT_SPEED 1
+#define DEFAULT_BOARD_ROW 0
 #define DEFAULT_PLAYER_ROW 21
 #define DEFAULT_PLAYER_COL 40
+#define LEFT_BOARD_BOUND 0
+#define RIGHT_BOARD_BOUND 80
+#define ANIMATION_SPEED 200
+#define WATTER_UPPER_ROW 4
+#define WATTER_LOWER_ROW 1
+#define LAND_ROW 0
+#define HOME_ROW 5
+#define FROG_JUMP_LENGTH 4
 
 /* private functions */
 void clearPlayer();
@@ -28,13 +41,13 @@ void setPlayerRow(int new);
 void setPlayerCol(int new);
 
 /* private variables */
-int playerBoardRow = 0;
-int playerSpeed = 1;
-int playerDirection = 0;
+int playerBoardRow = DEFAULT_BOARD_ROW;
+int playerSpeed = DEFAULT_SPEED;
+int playerDirection = DIRECTION_STAY;
 int playerRow = DEFAULT_PLAYER_ROW;
 int playerCol = DEFAULT_PLAYER_COL;
 
-static char* PLAYER_GRAPHIC[PLAYER_ANIM_TILES][PLAYER_HEIGHT+1] = {
+static char* PLAYER_GRAPHIC[ANIM_TILES][PLAYER_HEIGHT+1] = {
   {"@@",
    "<>"},
   {"--",
@@ -45,30 +58,30 @@ char** playerTile = PLAYER_GRAPHIC[1];
 // player thread
 void *playerUpdate()
 {
-	int i = 0;
+	int counter = 0;
 	int animTile = 0;
-	while (1)
+	while (!gameOver)
 	{
 		sleepTicks(playerSpeed);
 		
 		setPlayerCol(playerCol - playerDirection);
-		if (playerCol <= 0)
-			setPlayerCol(0);
-		else if (playerCol >= 80 - PLAYER_WIDTH)
-			setPlayerCol(80 - PLAYER_WIDTH);	
+		if (playerCol <= LEFT_BOARD_BOUND)
+			setPlayerCol(LEFT_BOARD_BOUND);
+		else if (playerCol >= RIGHT_BOARD_BOUND - PLAYER_WIDTH)
+			setPlayerCol(RIGHT_BOARD_BOUND - PLAYER_WIDTH);	
 		
 		if (isPlayerOverWater())
 				killFrog();
 		
-		if (i == 0)
+		if (counter == 0)
 		{
 			playerTile = PLAYER_GRAPHIC[animTile];
 			animTile = (animTile + 1) % 2;
 		}
 		
-		i = (i + playerSpeed);
-		if (i > 200)
-			i = 0;
+		counter = (counter + playerSpeed);
+		if (counter > ANIMATION_SPEED)
+			counter = 0;
 	}
 	pthread_exit(NULL);
 }
@@ -79,13 +92,13 @@ void *playerUpdate()
 void movePlayerUp()
 {
 	clearPlayer();
-	if (playerBoardRow < 4)
+	if (playerBoardRow < WATTER_UPPER_ROW)
 	{
-		setPlayerRow(playerRow - 4);
+		setPlayerRow(playerRow - FROG_JUMP_LENGTH);
 		setPlayerBoardRow(playerBoardRow + 1);
 		landPlayer();
 	}
-	else if (playerBoardRow == 4)
+	else if (playerBoardRow == WATTER_UPPER_ROW)
 	{
 		setPlayerBoardRow(playerBoardRow + 1);
 		landPlayer();
@@ -97,7 +110,7 @@ void movePlayerDown()
 	clearPlayer();
 	if (playerBoardRow != 0)
 	{
-		setPlayerRow(playerRow + 4);
+		setPlayerRow(playerRow + FROG_JUMP_LENGTH);
 		setPlayerBoardRow(playerBoardRow - 1);
 		landPlayer();
 	}
@@ -134,7 +147,7 @@ void clearPlayer()
 void landPlayer()
 {
 	// if player is above raging crocodile infested water
-	if (playerBoardRow > 0 && playerBoardRow < 5)
+	if (playerBoardRow >= WATTER_LOWER_ROW && playerBoardRow <= WATTER_UPPER_ROW)
 	{
 		if (!isPlayerOverWater())
 		{
@@ -147,28 +160,30 @@ void landPlayer()
 	}
 	else if (playerBoardRow == 0) // if player landed on land
 	{
-		setPlayerSpeed(1);
-		setPlayerDirection(0);
+		setPlayerSpeed(DEFAULT_SPEED);
+		setPlayerDirection(DIRECTION_STAY);
 	}
-	else if (playerBoardRow == 5)
+	else if (playerBoardRow == HOME_ROW)
 	{
 		Home *home = getHome(playerCol);
 		if (home != NULL && home->open != 0)
 		{
 			home->open = 0;
-			setPlayerRow(playerRow - 3);
+			setPlayerRow(playerRow - FROG_JUMP_LENGTH + 1);
 			playerTile = PLAYER_GRAPHIC[0];
 			drawPlayer();
 			
 			setPlayerRow(DEFAULT_PLAYER_ROW);
 			setPlayerCol(DEFAULT_PLAYER_COL);
-			setPlayerSpeed(1);
-			setPlayerDirection(0);
-			setPlayerBoardRow(0);
+			setPlayerSpeed(DEFAULT_SPEED);
+			setPlayerDirection(DIRECTION_STAY);
+			setPlayerBoardRow(DEFAULT_BOARD_ROW);
+			
+			checkGameOver();
 		}
 		else
 		{
-			setPlayerBoardRow(4);
+			setPlayerBoardRow(HOME_ROW - 1);
 		}
 	}
 }
@@ -176,9 +191,9 @@ void landPlayer()
 int isPlayerOverWater()
 {
 	int flag = 1;
-	if (playerBoardRow == 0)
+	if (playerBoardRow == LAND_ROW)
 		flag = 0;
-	else if (playerBoardRow > 0 && playerBoardRow < 5)
+	else if (playerBoardRow >= WATTER_LOWER_ROW && playerBoardRow <= WATTER_UPPER_ROW)
 	{
 		LogRow *logRow = logRows[playerBoardRow - 1];
 		LogNode *curr = logRow->logs->top;
@@ -200,12 +215,13 @@ void killFrog()
 {
 	setLives(getLives() - 1);
 	drawLives();
+	checkGameOver();
 			
 	setPlayerRow(DEFAULT_PLAYER_ROW);
 	setPlayerCol(DEFAULT_PLAYER_COL);
-	setPlayerSpeed(1);
-	setPlayerDirection(0);
-	setPlayerBoardRow(0);
+	setPlayerSpeed(DEFAULT_SPEED);
+	setPlayerDirection(DIRECTION_STAY);
+	setPlayerBoardRow(LAND_ROW);
 }
 
 /* private setters */

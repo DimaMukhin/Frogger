@@ -54,8 +54,8 @@ Log* createLog(int streamRow)
 void *logUpdate(void *arg)
 {
 	Log *log = (Log*) arg;
-	int i = 0;
-	while (1)
+	int frame = 0;
+	while (!gameOver)
 	{
 		sleepTicks(log->speed);
 		clearLog(log);
@@ -76,9 +76,11 @@ void *logUpdate(void *arg)
 			pthread_exit(NULL);
 		}
 		
-		logTile = LOG_GRAPHIC[i];
-		i = (i + 1) % 2;
+		logTile = LOG_GRAPHIC[frame];
+		frame = (frame + 1) % 2;
 	}
+	
+	pthread_exit(NULL);
 }
 
 void drawLog(Log *log)

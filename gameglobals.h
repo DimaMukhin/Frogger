@@ -7,6 +7,7 @@
 #include "logrow.h"
 
 #define NUM_HOMES 5
+#define DEFAULT_SLEEP_TICKS 1
 
 typedef struct home
 {
@@ -17,9 +18,15 @@ typedef struct home
 
 /* public global variables */
 
+int gameOver;
+
 LogRow* logRows[4];
 
-/* public global mutexes */
+/* public global mutexes and condition variables */
+
+pthread_cond_t gameOverCV;
+
+pthread_mutex_t gameOverMutex;
 
 pthread_mutex_t	drawMutex;
 
@@ -40,5 +47,7 @@ LogRow** getLogRows();
 void initializeGameGlobals();
 
 Home* getHome(int col);
+
+Home* getHomeIndex(int index);
 
 #endif
