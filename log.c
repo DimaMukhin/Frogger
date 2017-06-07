@@ -8,6 +8,9 @@
 #include "gameglobals.h"
 
 #define LOG_ANIM_TILES 2
+#define BOTTOM_WATTER_ROW 16
+#define DEFAULT_LOG_SPEED 10
+#define ROW_SPEED_INC 2
 
 /* private function prototypes */
 void clearLog();
@@ -22,24 +25,23 @@ static char* LOG_GRAPHIC[LOG_ANIM_TILES][LOG_HEIGHT+1] = {
    "|  x               x   |",
    "\\======================/"}
 };
-char** logTile = LOG_GRAPHIC[0];
 
 Log* createLog(int streamRow)
 {
-	int row = 16 - streamRow * LOG_HEIGHT;
-	int speed = 10 - streamRow * 2;
+	int row = BOTTOM_WATTER_ROW - streamRow * LOG_HEIGHT;
+	int speed = DEFAULT_LOG_SPEED - streamRow * ROW_SPEED_INC;
 	
 	int direction;
 	int col;
 	if (streamRow % 2 == 0)
 	{
-		col = 0 - LOG_LENGTH;
-		direction = -1;
+		col = LEFT_BOARD_BOUND - LOG_LENGTH;
+		direction = DIRECTION_RIGHT;
 	}
 	else
 	{
-		col = 80;
-		direction = 1;
+		col = GAME_COLS;
+		direction = DIRECTION_LEFT;
 	}
 	
 	Log *log = (Log*) malloc(sizeof(Log));
@@ -48,36 +50,32 @@ Log* createLog(int streamRow)
 	log->col = col;
 	log->speed = speed;
 	log->direction = direction;
+	log->frame = 0;
 	return log;
 }
 
 void *logUpdate(void *arg)
 {
 	Log *log = (Log*) arg;
-	int frame = 0;
+	int frameCounter = 0;
 	while (!gameOver)
 	{
 		sleepTicks(log->speed);
 		clearLog(log);
 		
-		log->col -= log->direction;
+		log->col += log->direction;
 		
-		// TODO merge if and else if
-		if (log->col + LOG_LENGTH < -10 && log->direction == 1)
+		if ((log->col + LOG_LENGTH < LEFT_BOARD_BOUND && log->direction == DIRECTION_LEFT) ||
+			(log->col > GAME_COLS && log->direction == DIRECTION_RIGHT))
 		{
 			removeLog(log, logRows[log->streamRow]->logs);
 			free(log);
 			pthread_exit(NULL);
 		}
-		else if (log->col > 80 && log->direction == -1)
-		{
-			removeLog(log, logRows[log->streamRow]->logs);
-			free(log);
-			pthread_exit(NULL);
-		}
-		
-		logTile = LOG_GRAPHIC[frame];
-		frame = (frame + 1) % 2;
+				
+		if (frameCounter == 0)
+			log->frame = (log->frame + 1) % 2;
+		frameCounter = (frameCounter + 1) % 4;
 	}
 	
 	pthread_exit(NULL);
@@ -86,7 +84,7 @@ void *logUpdate(void *arg)
 void drawLog(Log *log)
 {
 	pthread_mutex_lock(&drawMutex);
-	consoleDrawImage(log->row, log->col, logTile, LOG_HEIGHT);
+	consoleDrawImage(log->row, log->col, LOG_GRAPHIC[log->frame], LOG_HEIGHT);
 	pthread_mutex_unlock(&drawMutex);
 }
 

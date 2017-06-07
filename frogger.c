@@ -12,8 +12,6 @@
 #include "gameglobals.h"
 #include "threadwrappers.h"
 
-#define GAME_ROWS 24
-#define GAME_COLS 80
 #define NUM_ROWS 4
 #define LIFE_COL 41
 #define LIFE_ROW 1

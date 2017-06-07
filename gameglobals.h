@@ -8,6 +8,12 @@
 
 #define NUM_HOMES 5
 #define DEFAULT_SLEEP_TICKS 1
+#define GAME_ROWS 24
+#define GAME_COLS 80
+#define LEFT_BOARD_BOUND 0
+#define DIRECTION_LEFT -1
+#define DIRECTION_RIGHT 1
+#define DIRECTION_STAY 0
 
 typedef struct home
 {

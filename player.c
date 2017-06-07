@@ -8,30 +8,29 @@
 #include "loglist.h"
 #include "gameglobals.h"
 
+#define ANIMATION_SPEED 200
 #define ANIM_TILES 2
+#define DEFAULT_BOARD_ROW 0
+#define DEFAULT_PLAYER_COL 40
+#define DEFAULT_PLAYER_ROW 21
+#define DEFAULT_SPEED 1
+#define FROG_JUMP_LENGTH 4
+#define HOME_ROW 5
+#define LAND_ROW 0
 #define PLAYER_HEIGHT 2
 #define PLAYER_WIDTH 2
-#define DIRECTION_LEFT -1
-#define DIRECTION_RIGHT 1
-#define DIRECTION_STAY 0
-#define DEFAULT_SPEED 1
-#define DEFAULT_BOARD_ROW 0
-#define DEFAULT_PLAYER_ROW 21
-#define DEFAULT_PLAYER_COL 40
-#define LEFT_BOARD_BOUND 0
-#define RIGHT_BOARD_BOUND 80
-#define ANIMATION_SPEED 200
-#define WATTER_UPPER_ROW 4
+#define GAME_COLS 80
 #define WATTER_LOWER_ROW 1
-#define LAND_ROW 0
-#define HOME_ROW 5
-#define FROG_JUMP_LENGTH 4
+#define WATTER_UPPER_ROW 4
 
 /* private functions */
 void clearPlayer();
 void landPlayer();
-int isPlayerOverWater();
 void killFrog();
+void checkBounds();
+void animatePlayer();
+void restartPlayer();
+int isPlayerOverWater();
 
 /* private setters (for mutex) */
 void setPlayerBoardRow(int new);
@@ -54,34 +53,29 @@ static char* PLAYER_GRAPHIC[ANIM_TILES][PLAYER_HEIGHT+1] = {
    "<>"}
 };
 char** playerTile = PLAYER_GRAPHIC[1];
+int animationCounter = 0;
+int animTile = 0;
 
 // player thread
 void *playerUpdate()
 {
-	int counter = 0;
-	int animTile = 0;
 	while (!gameOver)
 	{
 		sleepTicks(playerSpeed);
 		
-		setPlayerCol(playerCol - playerDirection);
-		if (playerCol <= LEFT_BOARD_BOUND)
-			setPlayerCol(LEFT_BOARD_BOUND);
-		else if (playerCol >= RIGHT_BOARD_BOUND - PLAYER_WIDTH)
-			setPlayerCol(RIGHT_BOARD_BOUND - PLAYER_WIDTH);	
+		// move player
+		if (playerDirection != DIRECTION_STAY)
+		{
+			clearPlayer();
+			setPlayerCol(playerCol + playerDirection);
+		}
+		
+		checkBounds();
 		
 		if (isPlayerOverWater())
 				killFrog();
-		
-		if (counter == 0)
-		{
-			playerTile = PLAYER_GRAPHIC[animTile];
-			animTile = (animTile + 1) % 2;
-		}
-		
-		counter = (counter + playerSpeed);
-		if (counter > ANIMATION_SPEED)
-			counter = 0;
+			
+		animatePlayer();
 	}
 	pthread_exit(NULL);
 }
@@ -130,6 +124,27 @@ void movePlayerRight()
 
 /* private functions */
 
+void checkBounds()
+{
+	if (playerCol <= LEFT_BOARD_BOUND)
+		setPlayerCol(LEFT_BOARD_BOUND);
+	else if (playerCol >= GAME_COLS - PLAYER_WIDTH)
+		setPlayerCol(GAME_COLS - PLAYER_WIDTH);	
+}
+
+void animatePlayer()
+{
+	if (animationCounter == 0)
+	{
+		playerTile = PLAYER_GRAPHIC[animTile];
+		animTile = (animTile + 1) % 2;
+	}
+	
+	animationCounter = (animationCounter + playerSpeed);
+	if (animationCounter > ANIMATION_SPEED)
+		animationCounter = 0;
+}
+
 void drawPlayer()
 {
 	pthread_mutex_lock(&drawMutex);
@@ -158,7 +173,7 @@ void landPlayer()
 		else
 			killFrog();
 	}
-	else if (playerBoardRow == 0) // if player landed on land
+	else if (playerBoardRow == LAND_ROW) // if player landed on land
 	{
 		setPlayerSpeed(DEFAULT_SPEED);
 		setPlayerDirection(DIRECTION_STAY);
@@ -173,11 +188,7 @@ void landPlayer()
 			playerTile = PLAYER_GRAPHIC[0];
 			drawPlayer();
 			
-			setPlayerRow(DEFAULT_PLAYER_ROW);
-			setPlayerCol(DEFAULT_PLAYER_COL);
-			setPlayerSpeed(DEFAULT_SPEED);
-			setPlayerDirection(DIRECTION_STAY);
-			setPlayerBoardRow(DEFAULT_BOARD_ROW);
+			restartPlayer();
 			
 			checkGameOver();
 		}
@@ -215,13 +226,17 @@ void killFrog()
 {
 	setLives(getLives() - 1);
 	drawLives();
-	checkGameOver();
-			
+	checkGameOver();		
+	restartPlayer();
+}
+
+void restartPlayer()
+{
 	setPlayerRow(DEFAULT_PLAYER_ROW);
 	setPlayerCol(DEFAULT_PLAYER_COL);
 	setPlayerSpeed(DEFAULT_SPEED);
 	setPlayerDirection(DIRECTION_STAY);
-	setPlayerBoardRow(LAND_ROW);
+	setPlayerBoardRow(DEFAULT_BOARD_ROW);
 }
 
 /* private setters */

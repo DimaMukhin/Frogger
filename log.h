@@ -11,6 +11,7 @@ typedef struct log
 	int col;
 	int speed;
 	int direction;
+	int frame;
 } Log;
 
 /* public functions */
