@@ -21,6 +21,8 @@ void addLog(Log *log, LogList *logList);
 
 void removeLog(Log *log, LogList *logList);
 
+void cleanLogList(LogList *logList);
+
 Log* getLog(int streamRow, LogList *logList);
 
 #endif

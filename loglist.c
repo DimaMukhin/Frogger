@@ -3,6 +3,8 @@
 #include "loglist.h"
 #include "gameglobals.h"
 
+/*** public functions ***/
+
 LogList* createLogList()
 {
 	LogList *logList = (LogList*) malloc(sizeof(LogList));
@@ -24,6 +26,9 @@ void addLog(Log *log, LogList *logList)
 
 void removeLog(Log *log, LogList *logList)
 {
+	if (log == NULL || logList == NULL)
+		return;
+	
 	pthread_mutex_lock(&logListMutex);
 	
 	LogNode *curr = logList->top;
@@ -61,4 +66,24 @@ Log* getLog(int streamRow, LogList *logList)
 	return NULL;
 	
 	pthread_mutex_unlock(&logListMutex);
+}
+
+void cleanLogList(LogList *logList)
+{	
+	if (logList == NULL)
+		return;
+	
+	LogNode *curr = logList->top;
+	LogNode *prev = NULL;
+
+	while (curr != NULL)
+	{
+		if (prev != NULL)
+			free(prev);
+			
+		prev = curr;
+		curr = curr->next;
+	}
+
+	free(logList);
 }

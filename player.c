@@ -122,7 +122,7 @@ void movePlayerRight()
 	setPlayerCol(playerCol + 1);
 }
 
-/* private functions */
+/*** private functions ***/
 
 void checkBounds()
 {
@@ -164,11 +164,13 @@ void landPlayer()
 	// if player is above raging crocodile infested water
 	if (playerBoardRow >= WATTER_LOWER_ROW && playerBoardRow <= WATTER_UPPER_ROW)
 	{
-		if (!isPlayerOverWater())
+		if (!isPlayerOverWater()) // means he is on a log
 		{
-			Log *log = logRows[playerBoardRow - 1]->logs->top->log; // TODO: this is not safe!! what if log row is empty
-			setPlayerSpeed(log->speed);
-			setPlayerDirection(log->direction);
+			if (logRows[playerBoardRow - 1] != NULL)
+			{
+				setPlayerSpeed(logRows[playerBoardRow - 1]->speed);
+				setPlayerDirection(logRows[playerBoardRow - 1]->direction);
+			}
 		}
 		else
 			killFrog();

@@ -10,10 +10,22 @@
 #include "loglist.h"
 #include "threadwrappers.h"
 
+#define MIN_RAND_WAIT 200
+#define MAX_RAND_WAIT 500
+
+/*** public functions ***/
+
 LogRow* createLogRow(int row)
 {	
 	LogRow *logRowObj = (LogRow*) malloc(sizeof(LogRow));
 	logRowObj->row = row;
+	logRowObj->speed = DEFAULT_LOG_SPEED - row * ROW_SPEED_INC;
+	
+	if (row % 2 == 0)
+		logRowObj->direction = DIRECTION_RIGHT;
+	else
+		logRowObj->direction = DIRECTION_LEFT;
+	
 	logRowObj->logs = (LogList*) malloc(sizeof(LogList));
 	
 	return logRowObj;
@@ -23,34 +35,32 @@ void *logRowUpdate(void *arg)
 {
 	srand(time(NULL));
 	LogRow *logRow = (LogRow*) arg;
-	pthread_t logThread[5];
 	
 	int i = 0;
-	int randomWait = rand() % 200 + 300;
+	int randomWait = rand() % MIN_RAND_WAIT + (MAX_RAND_WAIT - MIN_RAND_WAIT);
 	while (!gameOver)
 	{
-		sleepTicks(1);
+		sleepTicks(DEFAULT_SLEEP_TICKS);
 		
 		if (i == 0)
 		{
-			Log *log = createLog(logRow->row);
+			Log *log = createLog(logRow->row); 
 			addLog(log, logRow->logs);
-			
-			// TODO: this one is also very dangerous, what if top log is not the new one?
-			createThread(&logThread[0], logUpdate, logRow->logs->top->log);
 		}
 		
 		i = (i + 1) % randomWait;
 	}
 	
-	// TODO: HUGE problem with this. when you dont join a thread, you dont release it from memory
-	// pthread_join(logThread[0], NULL);
-	// pthread_join(logThread[1], NULL);
-	// pthread_join(logThread[2], NULL);
-	// pthread_join(logThread[3], NULL);
-	// pthread_join(logThread[4], NULL);
-	
 	pthread_exit(NULL);
+}
+
+void cleanLogRow(LogRow *logRow)
+{
+	if (logRow != NULL)
+	{
+		cleanLogList(logRow->logs);
+		free(logRow);
+	}
 }
 
 void drawLogRow(LogRow *logRow)

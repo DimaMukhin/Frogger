@@ -8,17 +8,20 @@
 
 void initializeHomes();
 
+void initializeMutexes();
+
 /* private global variables */
 
 int lives;
 Home *homes;
 
-/* public functions */
+/*** public functions ***/
 
 void initializeGameGlobals()
 {
 	gameOver = 0;
-	lives = 4;
+	lives = START_LIFE;
+	initializeMutexes();
 	initializeHomes();
 }
 
@@ -50,7 +53,7 @@ void setLives(lifeNum)
 	lives = lifeNum;
 }
 
-/* private functions */
+/*** private functions ***/
 
 void initializeHomes()
 {
@@ -62,6 +65,7 @@ void initializeHomes()
 	homes[3].open = 1;
 	homes[4].open = 1;
 	
+	// NOTE: could not find a mathematical order so hard coded :(
 	homes[0].leftCol = 1;
 	homes[1].leftCol = 19;
 	homes[2].leftCol = 37;
@@ -73,4 +77,12 @@ void initializeHomes()
 	homes[2].rightCol = 42;
 	homes[3].rightCol = 60;
 	homes[4].rightCol = 78;
+}
+
+void initializeMutexes()
+{
+	pthread_mutex_init(&gameOverMutex, NULL);
+	pthread_mutex_init(&drawMutex, NULL);
+	pthread_mutex_init(&playerMutex, NULL);
+	pthread_mutex_init(&logListMutex, NULL);
 }
