@@ -1,3 +1,8 @@
+/*
+ * FILE     : log.h
+ * REMARKS  : header file of log.c
+ */
+
 #ifndef LOG_H
 #define LOG_H
 
@@ -8,24 +13,28 @@
 
 typedef struct log
 {
-	int streamRow;
-	int row;
-	int col;
-	int speed;
-	int direction;
-	int frame;
-	int alive;
-	pthread_t thread; // for joining purposes
+    int streamRow;      // Stream Row (0..3)
+    int row;            // draw row
+    int col;            // draw column
+    int speed;          // speed
+    int direction;      // direction
+    int frame;          // frame (animation)
+    int alive;          // true if still in bounds
+    pthread_t thread;   // for joining purposes
 } Log;
 
-/* public functions */
+/*** public functions ***/
 
-void drawLog(Log *log);
+// log constructor
+Log* createLog(int streamRow);
 
+// log logic thread
 void *logUpdate(void *arg);
 
-void cleanLog(Log *log);
+// draw the log
+void drawLog(Log *log);
 
-Log* createLog(int streamRow);
+// log cleanup
+void cleanLog(Log *log);
 
 #endif
