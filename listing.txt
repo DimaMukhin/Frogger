@@ -1,0 +1,1474 @@
+/*
+ * NAME                     : Dima Mukhin
+ * STUDENT NUMBER           : 7773184
+ * COURSE                   : COMP 3430
+ * INSTRUCTOR               : Dr. Jim Young
+ * ASSIGNMENT               : 2
+ * Question                 : 1
+ * 
+ * REMARKS: PLEASE read the README.txt file
+ *
+ */
+
+/*
+ * FILE     : main.c
+ * REMARKS  : Contains main function for running the game
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "gameglobals.h"
+#include "frogger.h" 
+#include "threadwrappers.h"
+
+// Start Frogger thread and wait for the game to finish
+int main(int argc, char**argv) {
+    runFrogger();
+    
+    pthread_t froggerThread;
+    createThread(&froggerThread, runFrogger, NULL);
+    
+    pthread_join(froggerThread, NULL);
+}
+
+/*
+ * FILE     : frogger.c
+ * REMARKS  : Contains main game logic, thread initialization, etc.
+ */
+
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <pthread.h>
+
+#include "console.h"
+#include "frogger.h"
+#include "player.h"
+#include "log.h"
+#include "logrow.h"
+#include "gameglobals.h"
+#include "threadwrappers.h"
+
+#define NUM_ROWS 4
+#define LIFE_COL 41
+#define LIFE_ROW 1
+#define MSG_LOST "looser"
+#define MSG_WON "winner!"
+#define KEY_W 'w'
+#define KEY_A 'a'
+#define KEY_S 's'
+#define KEY_D 'd'
+
+/**** DIMENSIONS MUST MATCH the ROWS/COLS */
+
+char *GAME_BOARD[] = {
+"                                   Lives:",
+"/------\\          /------\\          /------\\          /------\\          /------\\",
+"|      |          |      |          |      |          |      |          |      |",
+"+      +----------+      +----------+      +----------+      +----------+      +",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"",
+"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"",
+"",
+"",
+"" };
+
+/* private function prototypes */
+
+void *draw();               // draw and refresh thread
+void *keyboard();           // keyboard thread
+void *upkeep();             // upkeep thread
+void initializeThreads();   // initialize all threads
+void gameOverWait();        // wait for game to be over (CV)
+void joinThreads();         // join all threads
+void cleanDeadLogs();       // cleanup of dead logs
+void cleanLogRows();        // general cleanup of all log rows
+void drawGameBoard();       // draw the game board
+void printEndGameMessage(); // print the end game message
+int gameWon();              // was game won?
+
+/* private variables */
+
+char *gameOverMessage;      // message to display once the game is over (win/lose)
+
+/* private pthreads */
+
+pthread_t drawThread;               // draw/refresh thread
+pthread_t keyboardThread;           // keyboard input thread
+pthread_t playerUpdateThread;       // player logic thread
+pthread_t upkeepThread;             // upkeep (cleanup) thread
+pthread_t logRowThread[NUM_ROWS];   // log row thread
+
+/*** public functions ***/
+
+/*-----------------------------------------------------------------------------runFrogger
+ * main game thread,
+ * controls initialization of threads, and end game cleanup
+ */
+void *runFrogger()
+{
+    initializeGameGlobals();
+        
+    initializeThreads();
+    
+    gameOverWait();
+    
+    // Wait is done... (game is over)
+    
+    joinThreads();
+    cleanLogRows();
+    consoleFinish();
+    
+    finalKeypress();
+    pthread_exit(NULL);
+}
+
+/*-------------------------------------------------------------------------drawLives
+ * Draws remaining life on screen
+ */
+void drawLives()
+{
+    char life;
+    sprintf(&life, "%d", getLives());
+    
+    pthread_mutex_lock(&drawMutex);
+    putString(&life, 0, LIFE_COL, LIFE_ROW);
+    pthread_mutex_unlock(&drawMutex);
+}
+
+/*---------------------------------------------------------------------checkGameOver
+ * Check if the game is over and handle end of game
+ */
+void checkGameOver()
+{
+    if (getLives() == 0)
+    {
+        gameOverMessage = MSG_LOST;
+        gameOver = 1;
+    }   
+    else if (gameWon())
+    {
+        gameOverMessage = MSG_WON;
+        gameOver = 1;
+    }
+        
+    if (gameOver)
+    {
+        pthread_mutex_lock(&gameOverMutex);
+        pthread_cond_signal(&gameOverCV);
+        pthread_mutex_unlock(&gameOverMutex);
+    }
+}
+
+/*** private functions ***/
+
+/*------------------------------------------------------------------------------draw
+ * Refresh and draw of different components
+ */
+void *draw()
+{
+    consoleInit(GAME_ROWS, GAME_COLS, GAME_BOARD);
+    drawLives();
+    
+    drawGameBoard();
+    while (!gameOver)
+    {
+        sleepTicks(DEFAULT_SLEEP_TICKS);
+        
+        for (int i = 0; i < NUM_ROWS; i++)
+            drawLogRow(logRows[i]);
+
+        drawPlayer();
+        
+        pthread_mutex_lock(&drawMutex);
+        consoleRefresh();
+        pthread_mutex_unlock(&drawMutex);
+    }
+    
+    printEndGameMessage();
+    pthread_exit(NULL);
+}
+
+/*--------------------------------------------------------------------------keyboard
+ * Handle keyboard input
+ */
+void *keyboard()
+{
+    fd_set set;
+    int key;
+    while (!gameOver)
+    {
+        sleepTicks(DEFAULT_SLEEP_TICKS);
+        
+        /* timeout logic for joining the thread at end of game */
+        FD_ZERO(&set);
+        FD_SET(STDIN_FILENO, &set);
+        struct timespec timeout = getTimeout(1); /* duration of one tick */
+        int ret = pselect(FD_SETSIZE, &set, NULL, NULL, &timeout, NULL);
+        if (ret == -1) 
+        { 
+            perror("pselect error"); 
+            exit(EXIT_FAILURE);
+        }
+        
+        /* keyboard input logic */
+        if (ret != 0)
+        {
+            key = getchar();    
+            if (key == KEY_W)
+                movePlayerUp();
+            else if (key == KEY_A)
+                movePlayerLeft();
+            else if (key == KEY_S)
+                movePlayerDown();
+            else if (key == KEY_D)
+                movePlayerRight();
+        }
+        
+    }
+    pthread_exit(NULL);
+}
+
+/*----------------------------------------------------------------------------upkeep
+ * Upkeep (log cleanup)
+ */
+void *upkeep()
+{
+    while (!gameOver)
+    {
+        sleepTicks(DEFAULT_SLEEP_TICKS);
+        cleanDeadLogs();
+    }
+    
+    pthread_exit(NULL);
+}
+
+/*-----------------------------------------------------------------initializeThreads
+ * initialize all threads (except for log threads)
+ */
+void initializeThreads()
+{
+    createThread(&drawThread, draw, NULL);
+    createThread(&keyboardThread, keyboard, NULL);
+    createThread(&upkeepThread, upkeep, NULL);
+    createThread(&playerUpdateThread, playerUpdate, NULL);
+    for (int i = 0; i < NUM_ROWS; i++)
+    {
+        logRows[i] = createLogRow(i);
+        createThread(&logRowThread[i], logRowUpdate, logRows[i]);
+    }
+}
+
+/*-----------------------------------------------------------------------joinThreads
+ * join all threads (except for log threads)
+ */
+void joinThreads()
+{
+    pthread_join(drawThread, NULL);
+    pthread_join(keyboardThread, NULL);
+    pthread_join(upkeepThread, NULL);
+    pthread_join(playerUpdateThread, NULL);
+    for (int i = 0; i < NUM_ROWS; i++)
+        pthread_join(logRowThread[i], NULL);
+}
+
+/*---------------------------------------------------------------------cleanDeadLogs
+ * free dead logs and remove them from the list
+ */
+void cleanDeadLogs()
+{
+    for (int i = 0; i < NUM_LOG_ROWS; i++)
+    {
+        LogRow *logRow = logRows[i];
+        LogList *logList = logRow->logs;
+        LogNode *curr = logList->top;
+        while (curr != NULL) 
+        {
+            Log *log = curr->log;
+            if (log != NULL && !log->alive)
+            {
+                cleanLog(log);
+            }
+            curr = curr->next;
+        }
+    }
+}
+
+/*----------------------------------------------------------------------cleanLogRows
+ * clean of all data stractures: log list, logs, log rows etc.
+ * cleanup for end of game.
+ */
+void cleanLogRows()
+{
+    for (int i = 0; i < NUM_LOG_ROWS; i++)
+    {
+        cleanLogRow(logRows[i]);
+    }
+}
+
+/*----------------------------------------------------------------------gameOverWait
+ * setup a condition variable and wait for an end of game signal
+ */
+void gameOverWait()
+{
+    pthread_mutex_lock(&gameOverMutex);
+    while (!gameOver)
+        pthread_cond_wait(&gameOverCV, &gameOverMutex);
+    pthread_mutex_unlock(&gameOverMutex);
+}
+
+/*---------------------------------------------------------------------drawGameBoard
+ * draw the board!
+ */
+void drawGameBoard()
+{
+    pthread_mutex_lock(&drawMutex);
+    consoleDrawImage(0, 0, GAME_BOARD, GAME_ROWS);
+    pthread_mutex_unlock(&drawMutex);
+}
+
+/*---------------------------------------------------------------printEndGameMessage
+ * print end game message and disable the console
+ * REMARKS: disabling the console is important for not having any
+ *          artifacts on the screen or missing content
+ */
+void printEndGameMessage()
+{
+    pthread_mutex_lock(&drawMutex);
+    putBanner(gameOverMessage);
+    consoleRefresh();
+    pthread_mutex_unlock(&drawMutex);
+    disableConsole(1);
+}
+
+/*---------------------------------------------------------------------------gameWon
+ * check if game was won
+ */
+int gameWon()
+{
+    Home *home;
+    for (int i = 0; i < NUM_HOMES; i++)
+    {
+        home = getHomeIndex(i);
+        if (home->open)
+            return 0;
+    }
+    
+    return 1;
+}
+
+/*
+ * FILE     : frogger.h
+ * REMARKS  : Header file for frogger.c
+ */
+
+#ifndef FROGGER_H
+#define FROGGER_H
+
+/*** public functions ***/
+
+void *runFrogger();
+
+void drawLives();
+
+void checkGameOver();
+
+#endif
+
+/*
+ * FILE     : player.c
+ * REMARKS  : player logic
+ */
+
+#include <string.h>
+#include <pthread.h>
+
+#include "console.h"
+#include "player.h"
+#include "frogger.h"
+#include "log.h"
+#include "loglist.h"
+#include "gameglobals.h"
+
+#define ANIMATION_SPEED 200
+#define ANIM_TILES 2
+#define DEFAULT_BOARD_ROW 0
+#define DEFAULT_PLAYER_COL 40
+#define DEFAULT_PLAYER_ROW 21
+#define DEFAULT_SPEED 1
+#define FROG_JUMP_LENGTH 4
+#define HOME_ROW 5
+#define LAND_ROW 0
+#define PLAYER_HEIGHT 2
+#define PLAYER_WIDTH 2
+#define GAME_COLS 80
+#define WATTER_LOWER_ROW 1
+#define WATTER_UPPER_ROW 4
+
+/* private functions */
+
+void clearPlayer();         // clear the player before drawing
+void landPlayer();          // land the player after jump (landing logic)
+void killFrog();            // kill the frog
+void checkBounds();         // check right/left game board bounds
+void animatePlayer();       // player animation logic
+void restartPlayer();       // restart the player
+int isPlayerOverWater();    // is the player over/above water?
+
+/* private setters (for mutex) */
+
+void setPlayerBoardRow(int new);    // playerBoardRow setter
+void setPlayerSpeed(int new);       // playerSpeed setter
+void setPlayerDirection(int new);   // playerDirection setter
+void setPlayerRow(int new);         // playerRow setter
+void setPlayerCol(int new);         // playerCol setter
+
+/* private variables */
+
+int playerBoardRow = DEFAULT_BOARD_ROW; // players row relative to board (0..5)
+int playerSpeed = DEFAULT_SPEED;        // the speed of the player
+int playerDirection = DIRECTION_STAY;   // movement direction of the player
+int playerRow = DEFAULT_PLAYER_ROW;     // player draw row
+int playerCol = DEFAULT_PLAYER_COL;     // player draw col
+
+static char* PLAYER_GRAPHIC[ANIM_TILES][PLAYER_HEIGHT+1] = {
+  {"@@",
+   "<>"},
+  {"--",
+   "<>"}
+};
+char** playerTile = PLAYER_GRAPHIC[1];
+int animationCounter = 0;
+int animTile = 0;
+
+/*** public functions ***/
+
+/*----------------------------------------------------------------------playerUpdate
+ * player logic thread
+ */
+void *playerUpdate()
+{
+    while (!gameOver)
+    {
+        sleepTicks(playerSpeed);
+        
+        // move player
+        if (playerDirection != DIRECTION_STAY)
+        {
+            clearPlayer();
+            setPlayerCol(playerCol + playerDirection);
+        }
+        
+        checkBounds();
+        
+        if (isPlayerOverWater())
+                killFrog();
+            
+        animatePlayer();
+    }
+    pthread_exit(NULL);
+}
+
+/*------------------------------------------------------------------------drawPlayer
+ * Draw the player
+ */
+void drawPlayer()
+{
+    pthread_mutex_lock(&drawMutex);
+    consoleDrawImage(playerRow, playerCol, playerTile, PLAYER_HEIGHT);
+    pthread_mutex_unlock(&drawMutex);
+}
+
+/*----------------------------------------------------------------------movePlayerUp
+ * Move plater UP
+ * NOTE: can be called by different threads (use mutex)
+ */
+void movePlayerUp()
+{
+    clearPlayer();
+    if (playerBoardRow < WATTER_UPPER_ROW)
+    {
+        setPlayerRow(playerRow - FROG_JUMP_LENGTH);
+        setPlayerBoardRow(playerBoardRow + 1);
+        landPlayer();
+    }
+    else if (playerBoardRow == WATTER_UPPER_ROW)
+    {
+        setPlayerBoardRow(playerBoardRow + 1);
+        landPlayer();
+    }       
+}
+
+/*--------------------------------------------------------------------movePlayerDown
+ * Move plater DOWN
+ * NOTE: can be called by different threads (use mutex)
+ */
+void movePlayerDown()
+{
+    clearPlayer();
+    if (playerBoardRow != 0)
+    {
+        setPlayerRow(playerRow + FROG_JUMP_LENGTH);
+        setPlayerBoardRow(playerBoardRow - 1);
+        landPlayer();
+    }
+}
+
+/*--------------------------------------------------------------------movePlayerLeft
+ * Move plater LEFT
+ * NOTE: can be called by different threads (use mutex)
+ */
+void movePlayerLeft()
+{
+    clearPlayer();
+    setPlayerCol(playerCol - 1);
+}
+
+/*-------------------------------------------------------------------movePlayerRight
+ * Move plater RIGHT
+ * NOTE: can be called by different threads (use mutex)
+ */
+void movePlayerRight()
+{
+    clearPlayer();
+    setPlayerCol(playerCol + 1);
+}
+
+/*** private functions ***/
+
+/*-----------------------------------------------------------------------checkBounds
+ * check if player hit any of the bounds and push him back
+ */
+void checkBounds()
+{
+    if (playerCol <= LEFT_BOARD_BOUND)
+        setPlayerCol(LEFT_BOARD_BOUND);
+    else if (playerCol >= GAME_COLS - PLAYER_WIDTH)
+        setPlayerCol(GAME_COLS - PLAYER_WIDTH); 
+}
+
+/*---------------------------------------------------------------------animatePlayer
+ * Animate the player (blinking)
+ */
+void animatePlayer()
+{
+    if (animationCounter == 0)
+    {
+        playerTile = PLAYER_GRAPHIC[animTile];
+        animTile = (animTile + 1) % 2;
+    }
+    
+    animationCounter = (animationCounter + playerSpeed);
+    if (animationCounter > ANIMATION_SPEED)
+        animationCounter = 0;
+}
+
+/*-----------------------------------------------------------------------clearPlayer
+ * clear the player before drawing again
+ */
+void clearPlayer()
+{
+    pthread_mutex_lock(&drawMutex);
+    consoleClearImage(playerRow, playerCol, PLAYER_HEIGHT, strlen(PLAYER_GRAPHIC[0][0]));
+    pthread_mutex_unlock(&drawMutex);
+}
+
+/*------------------------------------------------------------------------landPlayer
+ * landing player logic. 3 different cases:
+ *  1. player is above water (above log or above empty water)
+ *  2. player is above land
+ *  3. player is above home
+ */
+void landPlayer()
+{
+    // if player is above raging crocodile infested water
+    if (playerBoardRow >= WATTER_LOWER_ROW && playerBoardRow <= WATTER_UPPER_ROW)
+    {
+        if (!isPlayerOverWater()) // means he is on a log
+        {
+            if (logRows[playerBoardRow - 1] != NULL)
+            {
+                setPlayerSpeed(logRows[playerBoardRow - 1]->speed);
+                setPlayerDirection(logRows[playerBoardRow - 1]->direction);
+            }
+        }
+        else
+            killFrog();
+    }
+    else if (playerBoardRow == LAND_ROW) // if player landed on land
+    {
+        setPlayerSpeed(DEFAULT_SPEED);
+        setPlayerDirection(DIRECTION_STAY);
+    }
+    else if (playerBoardRow == HOME_ROW)
+    {
+        Home *home = getHome(playerCol);
+        if (home != NULL && home->open != 0)
+        {
+            home->open = 0;
+            setPlayerRow(playerRow - FROG_JUMP_LENGTH + 1);
+            playerTile = PLAYER_GRAPHIC[0];
+            drawPlayer();
+            
+            restartPlayer();
+            
+            checkGameOver();
+        }
+        else
+        {
+            setPlayerBoardRow(HOME_ROW - 1);
+        }
+    }
+}
+
+/*-----------------------------------------------------------------isPlayerOverWater
+ * is the player over water? 
+ * NOTE: if the player is above a log, it is not over water.
+ */
+int isPlayerOverWater()
+{
+    int flag = 1;
+    if (playerBoardRow == LAND_ROW)
+        flag = 0;
+    else if (playerBoardRow >= WATTER_LOWER_ROW && playerBoardRow <= WATTER_UPPER_ROW)
+    {
+        LogRow *logRow = logRows[playerBoardRow - 1];
+        LogNode *curr = logRow->logs->top;
+        while (curr != NULL)
+        {
+            Log *log = curr->log;
+            
+            if (log != NULL && playerCol > log->col && playerCol < (log->col + LOG_LENGTH))
+                flag = 0;
+            
+            curr = curr->next;
+        }   
+    }
+    
+    return flag;
+}
+
+/*--------------------------------------------------------------------------killFrog
+ * Kill frog, update lives, is game over?
+ */
+void killFrog()
+{
+    setLives(getLives() - 1);
+    drawLives();
+    checkGameOver();        
+    restartPlayer();
+}
+
+/*---------------------------------------------------------------------restartPlayer
+ * restart player's variables to default
+ */
+void restartPlayer()
+{
+    setPlayerRow(DEFAULT_PLAYER_ROW);
+    setPlayerCol(DEFAULT_PLAYER_COL);
+    setPlayerSpeed(DEFAULT_SPEED);
+    setPlayerDirection(DIRECTION_STAY);
+    setPlayerBoardRow(DEFAULT_BOARD_ROW);
+}
+
+/* private setters (to ensure MUTEX) */
+
+/*-----------------------------------------------------------------setPlayerBoardRow
+ * set player board row
+ */
+void setPlayerBoardRow(int boardRow)
+{
+    pthread_mutex_lock(&playerMutex);
+    playerBoardRow = boardRow;
+    pthread_mutex_unlock(&playerMutex);
+}
+
+/*--------------------------------------------------------------------setPlayerSpeed
+ * set player speed
+ */
+void setPlayerSpeed(int speed)
+{
+    pthread_mutex_lock(&playerMutex);
+    playerSpeed = speed;
+    pthread_mutex_unlock(&playerMutex);
+}
+
+/*----------------------------------------------------------------setPlayerDirection
+ * set player direction
+ */
+void setPlayerDirection(int direction)
+{
+    pthread_mutex_lock(&playerMutex);
+    playerDirection = direction;
+    pthread_mutex_unlock(&playerMutex);
+}
+
+/*----------------------------------------------------------------------setPlayerRow
+ * set player row
+ */
+void setPlayerRow(int row)
+{
+    pthread_mutex_lock(&playerMutex);
+    playerRow = row;
+    pthread_mutex_unlock(&playerMutex);
+}
+
+/*----------------------------------------------------------------------setPlayerCol
+ * set player column
+ */
+void setPlayerCol(int col)
+{
+    pthread_mutex_lock(&playerMutex);
+    playerCol = col;
+    pthread_mutex_unlock(&playerMutex);
+}
+
+/*
+ * FILE     : player.h
+ * REMARKS  : header file of player.c
+ */
+
+#ifndef PLAYER_H
+#define PLAYER_H
+
+/*** public functions ***/
+
+// draw the player on screen
+void drawPlayer();
+
+// player update thread
+void *playerUpdate();
+
+// move player UP
+void movePlayerUp();
+
+// move player DOWN
+void movePlayerDown();
+
+// move player LEFT
+void movePlayerLeft();
+
+// move player RIGHT
+void movePlayerRight();
+
+#endif
+
+/*
+ * FILE     : log.c
+ * REMARKS  : Log object implementation
+ */
+
+#include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "console.h"
+#include "log.h"
+#include "frogger.h"
+#include "gameglobals.h"
+#include "threadwrappers.h"
+
+#define LOG_ANIM_TILES 2
+#define BOTTOM_WATTER_ROW 16
+
+/* private function prototypes */
+
+void clearLog(); // clear log before drawing
+
+static char* LOG_GRAPHIC[LOG_ANIM_TILES][LOG_HEIGHT+1] = {
+  {"/======================\\",
+   "|  x               x   |",
+   "|   x             x    |",
+   "\\======================/"},
+  {"/======================\\",
+   "|   x             x    |",
+   "|  x               x   |",
+   "\\======================/"}
+};
+
+/*** public functions ***/
+
+/*-------------------------------------------------------------------------createLog
+ * create a new log and return it (constructor)
+ * also creates a new thread and starts it
+ * streamRow: the stream row of the new log
+ */
+Log* createLog(int streamRow)
+{
+    int row = BOTTOM_WATTER_ROW - streamRow * LOG_HEIGHT;
+    int speed = DEFAULT_LOG_SPEED - streamRow * ROW_SPEED_INC;
+    
+    int direction;
+    int col;
+    if (streamRow % 2 == 0)
+    {
+        col = LEFT_BOARD_BOUND - LOG_LENGTH;
+        direction = DIRECTION_RIGHT;
+    }
+    else
+    {
+        col = GAME_COLS;
+        direction = DIRECTION_LEFT;
+    }
+    
+    /* properties assignment */
+    Log *log = (Log*) malloc(sizeof(Log));
+    log->streamRow = streamRow;
+    log->row = row;
+    log->col = col;
+    log->speed = speed;
+    log->direction = direction;
+    log->frame = 0;
+    log->alive = 1;
+    
+    createThread(&log->thread, logUpdate, log);
+    
+    return log;
+}
+
+/*-------------------------------------------------------------------------logUpdate
+ * Log logic thread
+ */
+void *logUpdate(void *arg)
+{
+    Log *log = (Log*) arg;
+    int frameCounter = 0;
+    while (!gameOver && log->alive)
+    {
+        sleepTicks(log->speed);
+        clearLog(log);
+        
+        log->col += log->direction;
+        
+        // if log has exited the game board, kill it
+        if ((log->col + LOG_LENGTH < LEFT_BOARD_BOUND 
+             && log->direction == DIRECTION_LEFT) ||
+            (log->col > GAME_COLS && log->direction == DIRECTION_RIGHT))
+        {
+            log->alive = 0;
+            pthread_exit(NULL);
+        }
+            
+        // log animation
+        if (frameCounter == 0)
+            log->frame = (log->frame + 1) % 2;
+        frameCounter = (frameCounter + 1) % 4;
+    }
+    
+    pthread_exit(NULL);
+}
+
+/*--------------------------------------------------------------------------cleanLog
+ * clean (free from mem) the log, remove from list, and join its thread
+ * REMARKS: this public function is called by the upkeep thread
+ */
+void cleanLog(Log *log)
+{
+    if (log != NULL)
+    {
+        pthread_join(log->thread, NULL);
+        removeLog(log, logRows[log->streamRow]->logs);
+        free(log);
+    }
+}
+
+/*---------------------------------------------------------------------------drawLog
+ * draw the log
+ */
+void drawLog(Log *log)
+{
+    if (log != NULL)
+    {
+        pthread_mutex_lock(&drawMutex);
+        consoleDrawImage(log->row, log->col, LOG_GRAPHIC[log->frame], LOG_HEIGHT);
+        pthread_mutex_unlock(&drawMutex);
+    }
+}
+
+/*** private functions ***/
+
+/*--------------------------------------------------------------------------clearLog
+ * clear the log (before drawing it)
+ */
+void clearLog(Log *log)
+{
+    if (log != NULL)
+    {
+        pthread_mutex_lock(&drawMutex);
+        consoleClearImage(log->row, log->col, LOG_HEIGHT, strlen(LOG_GRAPHIC[0][0]));
+        pthread_mutex_unlock(&drawMutex);
+    }
+}
+
+/*
+ * FILE     : log.h
+ * REMARKS  : header file of log.c
+ */
+
+#ifndef LOG_H
+#define LOG_H
+
+#include <pthread.h>
+
+#define LOG_HEIGHT 4
+#define LOG_LENGTH 24
+
+typedef struct log
+{
+    int streamRow;      // Stream Row (0..3)
+    int row;            // draw row
+    int col;            // draw column
+    int speed;          // speed
+    int direction;      // direction
+    int frame;          // frame (animation)
+    int alive;          // true if still in bounds
+    pthread_t thread;   // for joining purposes
+} Log;
+
+/*** public functions ***/
+
+// log constructor
+Log* createLog(int streamRow);
+
+// log logic thread
+void *logUpdate(void *arg);
+
+// draw the log
+void drawLog(Log *log);
+
+// log cleanup
+void cleanLog(Log *log);
+
+#endif
+
+/*
+ * FILE     : logrow.c
+ * REMARKS  : LogRow object implementation
+ */
+
+#include <stdio.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <time.h>
+
+#include "logrow.h"
+#include "log.h"
+#include "console.h"
+#include "gameglobals.h"
+#include "loglist.h"
+#include "threadwrappers.h"
+
+#define MIN_RAND_WAIT 200   // minimum random wait before log spawn
+#define MAX_RAND_WAIT 500   // maximum random wait before log spawn
+
+/*** public functions ***/
+
+/*----------------------------------------------------------------------createLogRow
+ * Log row constructor
+ */
+LogRow* createLogRow(int row)
+{   
+    LogRow *logRowObj = (LogRow*) malloc(sizeof(LogRow));
+    logRowObj->row = row;
+    logRowObj->speed = DEFAULT_LOG_SPEED - row * ROW_SPEED_INC;
+    
+    if (row % 2 == 0)
+        logRowObj->direction = DIRECTION_RIGHT;
+    else
+        logRowObj->direction = DIRECTION_LEFT;
+    
+    logRowObj->logs = (LogList*) malloc(sizeof(LogList));
+    
+    return logRowObj;
+}
+
+/*----------------------------------------------------------------------logRowUpdate
+ * Log row logic thread (spawning of logs)
+ */
+void *logRowUpdate(void *arg)
+{
+    srand(time(NULL));
+    LogRow *logRow = (LogRow*) arg;
+    
+    int randomCounter = 0; 
+    int randomWait = rand() % MIN_RAND_WAIT + (MAX_RAND_WAIT - MIN_RAND_WAIT);
+    while (!gameOver)
+    {
+        sleepTicks(DEFAULT_SLEEP_TICKS);
+        
+        if (randomCounter == 0)
+        {
+            Log *log = createLog(logRow->row); 
+            addLog(log, logRow->logs);
+        }
+        
+        randomCounter = (randomCounter + 1) % randomWait;
+    }
+    
+    pthread_exit(NULL);
+}
+
+/*-----------------------------------------------------------------------cleanLogRow
+ * log row cleanup (free and clean all logs associated with it)
+ */
+void cleanLogRow(LogRow *logRow)
+{
+    if (logRow != NULL)
+    {
+        cleanLogList(logRow->logs);
+        free(logRow);
+    }
+}
+
+/*------------------------------------------------------------------------drawLogRow
+ * draw all the logs associated with this row
+ */
+void drawLogRow(LogRow *logRow)
+{
+    LogNode *curr = logRow->logs->top;
+    while (curr != NULL)
+    {
+        drawLog(curr->log);
+        curr = curr->next;
+    }
+}
+
+/*
+ * FILE     : logrow.h
+ * REMARKS  : header file for logrow.c
+ */
+
+#ifndef LOGROW_H
+#define LOGROW_H
+
+#include "log.h"
+#include "loglist.h"
+
+typedef struct logRow
+{
+    int row;        // row (0..3)
+    int speed;      // the speed of the logs in the row
+    int direction;  // the direction of the logs in the row
+    LogList *logs;  // the logs in the row
+} LogRow;
+
+/*** public functions ***/
+
+// LogRow constructor
+LogRow* createLogRow(int row);
+
+// log row logic thread (spawn new logs)
+void *logRowUpdate(void *arg);
+
+// draw the whole row
+void drawLogRow(LogRow *logRow);
+
+// clean the whole row
+void cleanLogRow(LogRow *logRow);
+
+#endif
+
+/*
+ * FILE     : loglist.c
+ * REMARKS  : a linked list for logs
+ */
+
+#include <stdlib.h>
+
+#include "loglist.h"
+#include "gameglobals.h"
+
+/*** public functions ***/
+
+/*--------------------------------------------------------------------createLogList
+ * constructor
+ */
+LogList* createLogList()
+{
+    LogList *logList = (LogList*) malloc(sizeof(LogList));
+    logList->top = NULL;
+    return logList;
+}
+
+/*----------------------------------------------------------------------------addLog
+ * add a new log to the list.
+ * NOTE: MUTEX is very important here since multiple threads can try to
+ *       manipulate the same list at the same time.
+ */
+void addLog(Log *log, LogList *logList)
+{
+    pthread_mutex_lock(&logListMutex);
+    
+    LogNode *newNode = (LogNode*) malloc(sizeof(LogNode));
+    newNode->log = log;
+    newNode->next = logList->top;
+    logList->top = newNode;
+
+    pthread_mutex_unlock(&logListMutex);
+}
+
+/*-------------------------------------------------------------------------removeLog
+ * remove the specified log from the list.
+ * NOTE: MUTEX is very important here since multiple threads can try to
+ *       manipulate the same list at the same time.
+ */
+void removeLog(Log *log, LogList *logList)
+{
+    if (log == NULL || logList == NULL)
+        return;
+    
+    pthread_mutex_lock(&logListMutex);
+    
+    LogNode *curr = logList->top;
+    LogNode *prev = NULL;
+    while (curr != NULL && curr->log != log)
+    {
+        prev = curr;
+        curr = curr->next;
+    }
+    
+    if (curr != NULL)
+    {
+        if (prev != NULL)
+            prev->next = curr->next;
+        else
+            logList->top = curr->next;
+    }
+    
+    free(curr);
+    
+    pthread_mutex_unlock(&logListMutex);
+}
+
+/*----------------------------------------------------------------------------getLog
+ * get the first log associated with the stream row.
+ * NOTE: MUTEX is very important here since multiple threads can try to
+ *       manipulate the same list at the same time.
+ */
+Log* getLog(int streamRow, LogList *logList)
+{
+    pthread_mutex_lock(&logListMutex);
+    
+    LogNode *curr = logList->top;
+    while (curr != NULL && curr->log->streamRow != streamRow)
+        curr = curr->next;
+    
+    if (curr != NULL)
+        return curr->log;
+    
+    return NULL;
+    
+    pthread_mutex_unlock(&logListMutex);
+}
+
+/*----------------------------------------------------------------------cleanLogList
+ * log list cleanup
+ * NOTE: MUTEX is very important here since multiple threads can try to
+ *       manipulate the same list at the same time.
+ */
+void cleanLogList(LogList *logList)
+{   
+    if (logList == NULL)
+        return;
+    
+    pthread_mutex_lock(&logListMutex);
+    
+    LogNode *curr = logList->top;
+    LogNode *prev = NULL;
+
+    while (curr != NULL)
+    {
+        if (prev != NULL)
+            free(prev);
+            
+        prev = curr;
+        curr = curr->next;
+    }
+
+    free(logList);
+    
+    pthread_mutex_unlock(&logListMutex);
+}
+
+/*
+ * FILE     : loglist.h
+ * REMARKS  : header file of loglist.c
+ */
+
+#ifndef LOGLIST_H
+#define LOGLIST_H
+
+#include "log.h"
+
+typedef struct logNode LogNode;
+struct logNode
+{
+    Log *log;
+    LogNode *next; 
+};
+
+typedef struct logList
+{
+    LogNode *top;
+} LogList;
+
+/*** public functions ***/
+
+// constructor
+LogList* createLogList();
+
+// add a new log to the list
+void addLog(Log *log, LogList *logList);
+
+// remove a log from the list
+void removeLog(Log *log, LogList *logList);
+
+// clean the log list
+void cleanLogList(LogList *logList);
+
+// get the first log of a stream row from the list
+Log* getLog(int streamRow, LogList *logList);
+
+#endif
+
+/*
+ * FILE     : gameglobals.c
+ * REMARKS  : Game globals initialization, getters and setters
+ */
+
+#include <stdlib.h>
+#include <pthread.h>
+
+#include "gameglobals.h"
+#include "loglist.h"
+
+/* private function prototypes */
+
+void initializeHomes();     // initialize the homes
+void initializeMutexes();   // initialize all MUTEX
+
+/* private global variables */
+
+int lives;      // remaining lives
+Home *homes;    // all homes
+
+/*** public functions ***/
+
+/*-------------------------------------------------------------initializeGameGlobals
+ * initialize all game globals (called at start of game)
+ */
+void initializeGameGlobals()
+{
+    gameOver = 0;
+    lives = START_LIFE;
+    initializeMutexes();
+    initializeHomes();
+}
+
+/*---------------------------------------------------------------------------getHome
+ * get home based on a column on the board
+ * example: if there is a home between cols 10 and 20, anything in between
+ *          will return the home.
+ */
+Home* getHome(int col)
+{
+    for (int i = 0; i < NUM_HOMES; i++)
+    {
+        if (homes[i].leftCol <= col && homes[i].rightCol >= col)
+            return &homes[i];
+    }
+    
+    return NULL;
+}
+
+/*----------------------------------------------------------------------getHomeIndex
+ * get home by its index
+ */
+Home* getHomeIndex(int index)
+{
+    if (index < NUM_HOMES)
+        return &homes[index];
+    return NULL;
+}
+
+/*** public global variable getters/setters ***/
+
+/*--------------------------------------------------------------------------getLives
+ * get remaining lives
+ */
+int getLives()
+{
+    return lives;
+}
+
+/*--------------------------------------------------------------------------setLives
+ * set remaining lives
+ */
+void setLives(lifeNum)
+{
+    lives = lifeNum;
+}
+
+/*** private functions ***/
+
+/*-------------------------------------------------------------------initializeHomes
+ * initialize all homes
+ */
+void initializeHomes()
+{
+    homes = (Home*) malloc(sizeof(Home) * NUM_HOMES);
+    
+    homes[0].open = 1;
+    homes[1].open = 1;
+    homes[2].open = 1;
+    homes[3].open = 1;
+    homes[4].open = 1;
+    
+    // NOTE: could not find a mathematical order so hard coded :(
+    homes[0].leftCol = 1;
+    homes[1].leftCol = 19;
+    homes[2].leftCol = 37;
+    homes[3].leftCol = 55;
+    homes[4].leftCol = 73;
+    
+    homes[0].rightCol = 6;
+    homes[1].rightCol = 24;
+    homes[2].rightCol = 42;
+    homes[3].rightCol = 60;
+    homes[4].rightCol = 78;
+}
+
+/*-----------------------------------------------------------------initializeMutexes
+ * initialize all MUTEX with default attributes
+ */
+void initializeMutexes()
+{
+    pthread_mutex_init(&gameOverMutex, NULL);
+    pthread_mutex_init(&drawMutex, NULL);
+    pthread_mutex_init(&playerMutex, NULL);
+    pthread_mutex_init(&logListMutex, NULL);
+}
+
+/*
+ * FILE     : gameglobals.h
+ * REMARKS  : header file of gameglobals.h
+ */
+
+#ifndef GAMEGLOBALS_H
+#define GAMEGLOBALS_H
+
+#include <pthread.h>
+
+#include "loglist.h"
+#include "logrow.h"
+
+#define NUM_HOMES 5             // number of homes
+#define NUM_LOG_ROWS 4          // number of log rows
+#define DEFAULT_SLEEP_TICKS 1   // default sleep ticks (tick = 10ms)
+#define GAME_ROWS 24            // amount of game rows
+#define GAME_COLS 80            // amount of game columns
+#define LEFT_BOARD_BOUND 0      // bound of left side of game board
+#define DIRECTION_LEFT -1       // movement of left direction
+#define DIRECTION_RIGHT 1       // movement of right direction
+#define DIRECTION_STAY 0        // stay direction
+#define DEFAULT_LOG_SPEED 10    // default speed of the logs
+#define ROW_SPEED_INC 2         // speed increment amount of each log row
+#define START_LIFE 4            // starting amount of life
+
+typedef struct home
+{
+    int open;
+    int leftCol;
+    int rightCol;
+} Home;
+
+/*** public global variables ***/
+
+int gameOver;                   // is the game over?
+LogRow* logRows[NUM_LOG_ROWS];  // array of all log rows (0..3)
+
+/*** public global mutexes and condition variables ***/
+
+pthread_cond_t gameOverCV;      // game over condition variable
+pthread_mutex_t gameOverMutex;  // game over mutex
+pthread_mutex_t drawMutex;      // draw (and all console functions) mutex
+pthread_mutex_t playerMutex;    // player mutex
+pthread_mutex_t logListMutex;   // log list mutex
+
+/*** public global variable getters/setters ***/
+
+// get remaining lives
+int getLives();
+
+// set remaining lives
+void setLives(int lifeNum);
+
+// get all log rows
+LogRow** getLogRows();
+
+/*** public global functions ***/
+
+// initialize all game globals
+void initializeGameGlobals();
+
+// get home by column
+Home* getHome(int col);
+
+// get home by index
+Home* getHomeIndex(int index);
+
+#endif
+
+/*
+ * FILE     : threadwrappers.c
+ * REMARKS  : thread wrapper for easy error checking
+ */
+
+#include <pthread.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "threadwrappers.h"
+
+/*----------------------------------------------------------------------createThread
+ * initialize thread and check for errors
+ */
+void createThread(pthread_t *thread, void *func, void *in)
+{
+    if (pthread_create(thread, NULL, func, in) == -1) 
+    { 
+        perror("Thread Create Error"); 
+        exit(EXIT_FAILURE); 
+    }
+}
+
+/*
+ * FILE     : threadwrappers.h
+ * REMARKS  : header file of threadwrappers.c
+ */
+
+#ifndef THREADWRAPPERS_H
+#define THREADWRAPPERS_H
+
+#include <pthread.h>
+
+// initialize a new thread (and error check)
+void createThread(pthread_t *thread, void *func, void *in);
+
+#endif

@@ -6,6 +6,8 @@
  * ASSIGNMENT               : 2
  * Question                 : 1
  * 
+ * REMARKS: PLEASE read the README.txt file
+ *
  */
 
 /*

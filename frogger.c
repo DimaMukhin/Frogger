@@ -66,6 +66,7 @@ void joinThreads();         // join all threads
 void cleanDeadLogs();       // cleanup of dead logs
 void cleanLogRows();        // general cleanup of all log rows
 void drawGameBoard();       // draw the game board
+void printEndGameMessage(); // print the end game message
 int gameWon();              // was game won?
 
 /* private variables */
@@ -99,12 +100,6 @@ void *runFrogger()
     joinThreads();
     cleanLogRows();
     consoleFinish();
-    
-    // draw end game message
-    pthread_mutex_lock(&drawMutex);
-    putBanner(gameOverMessage);
-    consoleRefresh();
-    pthread_mutex_unlock(&drawMutex);
     
     finalKeypress();
     pthread_exit(NULL);
@@ -171,6 +166,8 @@ void *draw()
         consoleRefresh();
         pthread_mutex_unlock(&drawMutex);
     }
+    
+    printEndGameMessage();
     pthread_exit(NULL);
 }
 
@@ -310,6 +307,20 @@ void drawGameBoard()
     pthread_mutex_lock(&drawMutex);
     consoleDrawImage(0, 0, GAME_BOARD, GAME_ROWS);
     pthread_mutex_unlock(&drawMutex);
+}
+
+/*---------------------------------------------------------------printEndGameMessage
+ * print end game message and disable the console
+ * REMARKS: disabling the console is important for not having any
+ *          artifacts on the screen or missing content
+ */
+void printEndGameMessage()
+{
+    pthread_mutex_lock(&drawMutex);
+    putBanner(gameOverMessage);
+    consoleRefresh();
+    pthread_mutex_unlock(&drawMutex);
+    disableConsole(1);
 }
 
 /*---------------------------------------------------------------------------gameWon
